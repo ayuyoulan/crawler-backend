@@ -3,7 +3,7 @@ class ApiResponseClass {
     data = [];
     msg = "SUCCESS";
     constructor(data) {
-        if (Array.isArray(data)) {
+        if (data != null) {
             this.data = data;
         }
     }
