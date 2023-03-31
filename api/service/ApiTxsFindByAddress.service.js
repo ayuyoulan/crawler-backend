@@ -10,7 +10,7 @@ const puppeteer = require('puppeteer');
  * @author Andy
  */
 function findByAddressValidator(req, res, next) {
-    const { a, page } = req.query;
+    const { a, page, pageSize } = req.query;
 
     if (a == null) {
         const apiRes = new ApiResponseClass();
@@ -24,7 +24,7 @@ function findByAddressValidator(req, res, next) {
         apiRes.code = 10001
         apiRes.msg = '参数 a 应为为字符串'
         res.json(apiRes);
-    } else if (a.length !== 66) {
+    } else if (a.length !== 42) {
         const apiRes = new ApiResponseClass();
         // 暂定 该接口参数http业务异常编码
         apiRes.code = 10001
@@ -33,6 +33,10 @@ function findByAddressValidator(req, res, next) {
     } else {
         if (typeof page !== 'number') {
             req.query.page = 1;
+        }
+
+        if (typeof pageSize !== 'number') {
+            req.query.pageSize = 50;
         }
 
         next();
@@ -46,10 +50,22 @@ function findByAddressValidator(req, res, next) {
  * @author Andy
  */
 async function findByAddress(req, res) {
-    const { a, page } = req.query;
-    const apiRes = new ApiResponseClass('123');
-    try {
+    const { a, page, pageSize } = req.query;
+    const apiRes = new ApiResponseClass();
 
+    try {
+        let list = await etherscanDao.paginationQuery(
+            { address: a },
+            page,
+            pageSize
+        );
+
+        if (list.length === 0) {
+            etherscanCrawler(a, page)
+            apiRes.data = `正在获取数据请稍后查询`;
+        } else {
+            apiRes.data = list;
+        }
         res.json(apiRes);
     } catch (e) {
         console.error(`接口 /api/txs | 参数 a ${a} page ${page} | 出错 ${e.stack}`);
@@ -66,28 +82,28 @@ async function findByAddress(req, res) {
  * @param {*} page 浏览器实例
  * @description 首次调用时返回第一页数据
  */
-async function etherscanCrawler(address, targetPage, page) {
-    const address = address || `0xafab1d06825981b28f155ce433d310ff45e3a5d2`;
-    const targetPage = targetPage || 1;
-
-    if (!page) {
-        // 1. 打开浏览器
-        const browser = await puppeteer.launch({ headless: false });
-
-        // 2. 新建一个标签页
-        page = await browser.newPage();
-    }
-
-    // 3. 输入地址敲回车
-    await page.goto(targetPage === 1 ? `https://etherscan.io/txs?a=${address}` : `https://etherscan.io/txs?a=${address}&p=${targetPage}`);
-    await page.waitForTimeout(5000);
-
-    // 4. 操作：
+async function etherscanCrawler(address, targetPage, page, browser) {
     const list = [];
 
     try {
+        if (!page) {
+            // 1. 打开浏览器
+            browser = await puppeteer.launch({
+                headless: false
+            });
+
+            // 2. 新建一个标签页
+            page = await browser.newPage();
+        }
+
+        // 3. 输入地址敲回车
+        await page.goto(targetPage === 1 ? `https://etherscan.io/txs?a=${address}` : `https://etherscan.io/txs?a=${address}&p=${targetPage}`);
+
+        await page.waitForTimeout(5000);
+
         await page.waitForSelector("#ContentPlaceHolder1_divTransactions > div.table-responsive > table > tbody > tr");
 
+        // 4. 操作：
         const totalPage = await page.$eval(`#ContentPlaceHolder1_divDataInfo > div > div.d-flex.flex-wrap.align-items-center.justify-content-between.gap-2 > nav > ul > li:nth-child(3) > span`, elem => elem.innerHTML.split(' ').pop());
 
         const dataLen = await page.$$eval("#ContentPlaceHolder1_divTransactions > div.table-responsive > table > tbody > tr", elems => elems.length);
@@ -121,21 +137,19 @@ async function etherscanCrawler(address, targetPage, page) {
         }
 
         await etherscanDao.insertOne(list.map(info => ({ address, ...info })));
-
-        browser.close();
-        return;
-
         if (targetPage === 1) {
             // 不添加语法糖 await
-            etherscanCrawler(address, targetPage + 1);
+            etherscanCrawler(address, targetPage + 1, page, browser);
             return list;
         }
 
         if (targetPage < totalPage) {
             // 不添加语法糖 await
-            etherscanCrawler(address, targetPage + 1);
+            etherscanCrawler(address, targetPage + 1, page, browser);
             return;
         }
+
+        browser.close();
 
         console.log(`地址 ${address} | 共 ${totalPage} 页 | 爬取完毕`);
     } catch (e) {
