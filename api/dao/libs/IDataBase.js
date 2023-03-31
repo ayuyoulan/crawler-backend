@@ -14,12 +14,22 @@ class IDataBase {
 
     async insertOne(params) {
         try {
-            inserted = await this.db.insert(params);
+            const inserted = await this.db.insert(params);
+            return inserted;
         } catch (e) {
             console.error(`数据库 | 表 ${this.databaseName} | insertOne | 参数 ${params} | 出错 ${e.stack} `);
         }
     }
 
+    async find(params) {
+        try {
+            const list = await this.db.find(params);
+            return list;
+        } catch (e) {
+            console.error(`数据库 | 表 ${this.databaseName} | find | 参数 ${params} | 出错 ${e.stack} `);
+            return [];
+        }
+    }
 }
 
 module.exports = IDataBase;
